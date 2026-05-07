@@ -12,3 +12,7 @@
 
 // Number of holding registers cached per slave (0-based index 0..63).
 #define GATEWAY_REGS_PER_SLAVE  64
+
+// RS-485 operating mode (GatewayConfig::rs485_mode)
+#define RS485_MODE_MODBUS_RTU   0   ///< Modbus RTU master (default)
+#define RS485_MODE_NMEA0183     1   ///< NMEA 0183 listener

@@ -21,6 +21,30 @@ static WebServer s_web(80);
 // Embedded HTML (PROGMEM)
 // ---------------------------------------------------------------------------
 
+/**
+ * webconfig.cpp
+ *
+ * Provides a browser-accessible configuration and monitoring UI over HTTP.
+ * Uses the built-in ESP32 WebServer class (no extra library needed).
+ *
+ * The HTML page is stored in PROGMEM as a raw-string literal so it does
+ * not consume RAM at runtime.
+ */
+
+#include "webconfig.h"
+#include "../config/config.h"
+#include "../reg_map/reg_map.h"
+#include "../defs.h"
+#include <WebServer.h>
+#include <ArduinoJson.h>
+#include <Arduino.h>
+
+static WebServer s_web(80);
+
+// ---------------------------------------------------------------------------
+// Embedded HTML (PROGMEM)
+// ---------------------------------------------------------------------------
+
 static const char HTML_PAGE[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -29,7 +53,7 @@ static const char HTML_PAGE[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <title>ESP32-S3 Gateway</title>
 <style>
 *{box-sizing:border-box}
-body{font-family:Arial,sans-serif;background:#eef2f7;margin:0;padding:16px;max-width:900px}
+body{font-family:Arial,sans-serif;background:#eef2f7;margin:0;padding:16px;max-width:960px}
 h1{color:#003366;margin-bottom:4px}
 .sub{color:#555;font-size:.9rem;margin-bottom:20px}
 h2{color:#003366;border-bottom:2px solid #003366;padding-bottom:4px;margin-top:28px}
@@ -44,6 +68,10 @@ input[type=text]:focus,input[type=number]:focus,input[type=password]:focus{
   outline:none;border-color:#0055aa}
 .cb-row{display:flex;align-items:center;gap:8px;margin-top:12px;font-weight:600}
 .cb-row input{width:auto}
+.seg{display:flex;gap:0;margin-top:8px;border-radius:6px;overflow:hidden;border:1px solid #003366;width:fit-content}
+.seg button{padding:8px 22px;border:none;cursor:pointer;font-size:.9rem;font-weight:600;
+  background:#fff;color:#003366;transition:background .15s}
+.seg button.active{background:#003366;color:#fff}
 .actions{margin-top:24px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .btn{padding:10px 24px;border:none;border-radius:6px;cursor:pointer;font-size:.95rem;font-weight:600}
 .btn-save{background:#003366;color:#fff}.btn-save:hover{background:#0044aa}
@@ -54,11 +82,12 @@ input[type=text]:focus,input[type=number]:focus,input[type=password]:focus{
   border-radius:8px;min-height:90px;white-space:pre;overflow:auto;font-size:.82rem}
 .badge{background:#dde8ff;color:#003366;border-radius:12px;
   font-size:.75rem;padding:2px 9px;font-weight:700;margin-left:6px;vertical-align:middle}
+.hidden{display:none!important}
 </style>
 </head>
 <body>
-<h1>&#9889; ESP32-S3 Modbus Gateway</h1>
-<div class="sub">Configure, monitor, and manage the Modbus RTU &#8594; TCP / UDP / NMEA 2000 gateway.</div>
+<h1>&#9889; ESP32-S3 Modbus/NMEA Gateway</h1>
+<div class="sub">Configure, monitor, and manage the RS-485 &#8594; Modbus TCP / UDP / NMEA 2000 gateway.</div>
 
 <!-- WiFi -->
 <h2>WiFi</h2>
@@ -69,21 +98,65 @@ input[type=text]:focus,input[type=number]:focus,input[type=password]:focus{
   </div>
 </div>
 
-<!-- Modbus RTU -->
-<h2>Modbus RTU Master <span class="badge">RS-485</span></h2>
+<!-- RS-485 Mode -->
+<h2>RS-485 Mode</h2>
+<div class="card">
+  <label style="margin-top:0">Select operating mode for the RS-485 port</label>
+  <div class="seg" style="margin-top:10px">
+    <button id="mode_rtu" class="active" onclick="setMode(0)">&#9679; Modbus RTU</button>
+    <button id="mode_nmea" onclick="setMode(1)">&#9679; NMEA 0183</button>
+  </div>
+  <p style="font-size:.82rem;color:#666;margin:8px 0 0">
+    Reboot required after changing mode. The TX/RX/DE pins are shared between both modes.
+  </p>
+</div>
+
+<!-- RS-485 Hardware (shared) -->
+<h2>RS-485 Hardware</h2>
 <div class="card">
   <div class="row">
-    <label>Baud Rate<input id="rtu_baud" type="number" min="1200" max="115200"></label>
     <label>TX GPIO<span>UART TX / RS-485 DI</span><input id="rtu_tx" type="number" min="0" max="48"></label>
     <label>RX GPIO<span>UART RX / RS-485 RO</span><input id="rtu_rx" type="number" min="0" max="48"></label>
     <label>DE/RE GPIO<span>RS-485 driver enable</span><input id="rtu_de" type="number" min="0" max="48"></label>
   </div>
+</div>
+
+<!-- Modbus RTU section (hidden in NMEA mode) -->
+<div id="sec_modbus">
+<h2>Modbus RTU Master <span class="badge">RS-485</span></h2>
+<div class="card">
   <div class="row">
+    <label>Baud Rate<input id="rtu_baud" type="number" min="1200" max="115200"></label>
     <label>Slave IDs<span>Comma-separated, e.g. 1,2,3</span><input id="rtu_slaves" type="text"></label>
+  </div>
+  <div class="row">
     <label>Start Register<input id="rtu_reg_start" type="number" min="0" max="65535"></label>
     <label>Register Count<span>Max 64</span><input id="rtu_reg_count" type="number" min="1" max="64"></label>
     <label>Poll Interval (ms)<input id="rtu_poll_ms" type="number" min="100"></label>
   </div>
+</div>
+</div>
+
+<!-- NMEA 0183 section (hidden in Modbus mode) -->
+<div id="sec_nmea" class="hidden">
+<h2>NMEA 0183 Listener <span class="badge">RS-485</span></h2>
+<div class="card">
+  <div class="row">
+    <label>Baud Rate<span>Standard: 4800, high-speed: 38400</span><input id="nmea_baud" type="number" min="1200" max="115200"></label>
+  </div>
+  <label class="cb-row" style="margin-top:14px">
+    <input id="nmea_udp_raw_en" type="checkbox"> Broadcast raw NMEA sentences over UDP
+  </label>
+  <div class="row" style="margin-top:6px">
+    <label>Raw NMEA UDP Port<span>Default 10110 (NMEA standard)</span>
+      <input id="nmea_udp_raw_port" type="number" min="1" max="65535">
+    </label>
+  </div>
+  <p style="font-size:.82rem;color:#666;margin:10px 0 0">
+    Sentences parsed: HDT, HDG, DBT, DBS, VHW, GLL, GGA, RMC.<br>
+    Parsed values are stored in the register map and forwarded to Modbus TCP/UDP and NMEA 2000.
+  </p>
+</div>
 </div>
 
 <!-- Modbus TCP -->
@@ -93,9 +166,8 @@ input[type=text]:focus,input[type=number]:focus,input[type=password]:focus{
     <label>TCP Port<input id="tcp_port" type="number" min="1" max="65535"></label>
   </div>
   <p style="font-size:.82rem;color:#666;margin:8px 0 0">
-    FC03 / FC04 supported. Set MBAP Unit ID = slave address (1-8) to read that
-    slave's registers. Unit ID 0 / 0xFF uses flat addressing:
-    tcp_addr = (slave&#8722;1)&#215;64 + reg.
+    FC03 / FC04 supported. Unit ID = slave address (1-8) routes to that slave's data.
+    Unit ID 0 / 0xFF uses flat addressing: tcp_addr = (slave&#8722;1)&#215;64 + reg.
   </p>
 </div>
 
@@ -107,7 +179,7 @@ input[type=text]:focus,input[type=number]:focus,input[type=password]:focus{
     <label>Interval (ms)<input id="udp_interval" type="number" min="100"></label>
   </div>
   <p style="font-size:.82rem;color:#666;margin:8px 0 0">
-    Broadcasts JSON to 255.255.255.255 with all slave register values.
+    Broadcasts JSON register map to 255.255.255.255.
   </p>
 </div>
 
@@ -118,7 +190,8 @@ input[type=text]:focus,input[type=number]:focus,input[type=password]:focus{
     <input id="n2k_en" type="checkbox"> Enable N2K forwarding
   </label>
   <div class="row" style="margin-top:6px">
-    <label>Source Slave ID<input id="n2k_slave" type="number" min="1" max="8"></label>
+    <label>Source Slave / Virtual ID<span>Modbus slave or NMEA 0183 virtual slot</span>
+      <input id="n2k_slave" type="number" min="1" max="8"></label>
     <label>Transmit Interval (ms)<input id="n2k_interval" type="number" min="100"></label>
   </div>
   <div class="row">
@@ -142,10 +215,20 @@ input[type=text]:focus,input[type=number]:focus,input[type=password]:focus{
 </div>
 
 <!-- Live data -->
-<h2>Live Register Data <span class="badge">auto-refresh 2 s</span></h2>
+<h2>Live Data <span class="badge">auto-refresh 2 s</span></h2>
 <div id="livedata">Loading&#8230;</div>
 
 <script>
+var g_mode=0; // 0=ModbusRTU, 1=NMEA0183
+
+function setMode(m){
+  g_mode=m;
+  document.getElementById('mode_rtu').className=(m===0)?'active':'';
+  document.getElementById('mode_nmea').className=(m===1)?'active':'';
+  document.getElementById('sec_modbus').className=(m===0)?'':'hidden';
+  document.getElementById('sec_nmea').className=(m===1)?'':'hidden';
+}
+
 async function loadConfig(){
   try{
     const r=await fetch('/api/config');
@@ -153,14 +236,18 @@ async function loadConfig(){
     const c=await r.json();
     set('ssid',c.wifi_ssid||'');
     set('pass',c.wifi_pass||'');
-    set('rtu_baud',c.rtu_baud||9600);
+    setMode(c.rs485_mode||0);
     set('rtu_tx',c.rtu_tx_pin||17);
     set('rtu_rx',c.rtu_rx_pin||18);
     set('rtu_de',c.rtu_de_pin||16);
+    set('rtu_baud',c.rtu_baud||9600);
     set('rtu_slaves',(c.rtu_slave_ids||[1]).join(','));
     set('rtu_reg_start',c.rtu_reg_start??0);
     set('rtu_reg_count',c.rtu_reg_count||16);
     set('rtu_poll_ms',c.rtu_poll_ms||1000);
+    set('nmea_baud',c.nmea_baud||4800);
+    document.getElementById('nmea_udp_raw_en').checked=!!c.nmea_udp_raw_enabled;
+    set('nmea_udp_raw_port',c.nmea_udp_raw_port||10110);
     set('tcp_port',c.tcp_port||502);
     set('udp_port',c.udp_port||1502);
     set('udp_interval',c.udp_interval_ms||2000);
@@ -176,6 +263,7 @@ async function loadConfig(){
     set('n2k_lon_f',c.n2k_lon_frac_reg??6);
   }catch(e){console.error('loadConfig',e);}
 }
+
 function set(id,v){const el=document.getElementById(id);if(el)el.value=v;}
 function num(id){return parseInt(document.getElementById(id).value)||0;}
 
@@ -185,11 +273,15 @@ async function saveConfig(){
   const body={
     wifi_ssid:document.getElementById('ssid').value,
     wifi_pass:document.getElementById('pass').value,
-    rtu_baud:num('rtu_baud'),rtu_tx_pin:num('rtu_tx'),
-    rtu_rx_pin:num('rtu_rx'),rtu_de_pin:num('rtu_de'),
+    rs485_mode:g_mode,
+    rtu_tx_pin:num('rtu_tx'),rtu_rx_pin:num('rtu_rx'),rtu_de_pin:num('rtu_de'),
+    rtu_baud:num('rtu_baud'),
     rtu_slave_ids:slaves,
     rtu_reg_start:num('rtu_reg_start'),rtu_reg_count:num('rtu_reg_count'),
     rtu_poll_ms:num('rtu_poll_ms'),
+    nmea_baud:num('nmea_baud'),
+    nmea_udp_raw_enabled:document.getElementById('nmea_udp_raw_en').checked,
+    nmea_udp_raw_port:num('nmea_udp_raw_port'),
     tcp_port:num('tcp_port'),
     udp_port:num('udp_port'),udp_interval_ms:num('udp_interval'),
     n2k_enabled:document.getElementById('n2k_en').checked,
@@ -218,7 +310,8 @@ function confirmReset(){
 
 async function loadLive(){
   try{
-    const r=await fetch('/api/regs');
+    const ep=(g_mode===1)?'/api/nmea':'/api/regs';
+    const r=await fetch(ep);
     if(r.ok){
       const d=await r.json();
       document.getElementById('livedata').textContent=JSON.stringify(d,null,2);
@@ -263,30 +356,34 @@ static void handle_get_config()
     GatewayConfig &cfg = config_get();
 
     JsonDocument doc;
-    doc["wifi_ssid"]         = cfg.wifi_ssid;
-    doc["wifi_pass"]         = cfg.wifi_pass;
-    doc["rtu_baud"]          = cfg.rtu_baud;
-    doc["rtu_tx_pin"]        = cfg.rtu_tx_pin;
-    doc["rtu_rx_pin"]        = cfg.rtu_rx_pin;
-    doc["rtu_de_pin"]        = cfg.rtu_de_pin;
+    doc["wifi_ssid"]             = cfg.wifi_ssid;
+    doc["wifi_pass"]             = cfg.wifi_pass;
+    doc["rs485_mode"]            = cfg.rs485_mode;
+    doc["rtu_baud"]              = cfg.rtu_baud;
+    doc["rtu_tx_pin"]            = cfg.rtu_tx_pin;
+    doc["rtu_rx_pin"]            = cfg.rtu_rx_pin;
+    doc["rtu_de_pin"]            = cfg.rtu_de_pin;
     JsonArray ids = doc["rtu_slave_ids"].to<JsonArray>();
     for (uint8_t i = 0; i < cfg.rtu_slave_count; i++) ids.add(cfg.rtu_slave_ids[i]);
-    doc["rtu_reg_start"]     = cfg.rtu_reg_start;
-    doc["rtu_reg_count"]     = cfg.rtu_reg_count;
-    doc["rtu_poll_ms"]       = cfg.rtu_poll_ms;
-    doc["tcp_port"]          = cfg.tcp_port;
-    doc["udp_port"]          = cfg.udp_port;
-    doc["udp_interval_ms"]   = cfg.udp_interval_ms;
-    doc["n2k_enabled"]       = cfg.n2k_enabled;
-    doc["n2k_src_slave"]     = cfg.n2k_src_slave;
-    doc["n2k_heading_reg"]   = cfg.n2k_heading_reg;
-    doc["n2k_depth_reg"]     = cfg.n2k_depth_reg;
-    doc["n2k_speed_reg"]     = cfg.n2k_speed_reg;
-    doc["n2k_lat_int_reg"]   = cfg.n2k_lat_int_reg;
-    doc["n2k_lat_frac_reg"]  = cfg.n2k_lat_frac_reg;
-    doc["n2k_lon_int_reg"]   = cfg.n2k_lon_int_reg;
-    doc["n2k_lon_frac_reg"]  = cfg.n2k_lon_frac_reg;
-    doc["n2k_interval_ms"]   = cfg.n2k_interval_ms;
+    doc["rtu_reg_start"]         = cfg.rtu_reg_start;
+    doc["rtu_reg_count"]         = cfg.rtu_reg_count;
+    doc["rtu_poll_ms"]           = cfg.rtu_poll_ms;
+    doc["nmea_baud"]             = cfg.nmea_baud;
+    doc["nmea_udp_raw_enabled"]  = cfg.nmea_udp_raw_enabled;
+    doc["nmea_udp_raw_port"]     = cfg.nmea_udp_raw_port;
+    doc["tcp_port"]              = cfg.tcp_port;
+    doc["udp_port"]              = cfg.udp_port;
+    doc["udp_interval_ms"]       = cfg.udp_interval_ms;
+    doc["n2k_enabled"]           = cfg.n2k_enabled;
+    doc["n2k_src_slave"]         = cfg.n2k_src_slave;
+    doc["n2k_heading_reg"]       = cfg.n2k_heading_reg;
+    doc["n2k_depth_reg"]         = cfg.n2k_depth_reg;
+    doc["n2k_speed_reg"]         = cfg.n2k_speed_reg;
+    doc["n2k_lat_int_reg"]       = cfg.n2k_lat_int_reg;
+    doc["n2k_lat_frac_reg"]      = cfg.n2k_lat_frac_reg;
+    doc["n2k_lon_int_reg"]       = cfg.n2k_lon_int_reg;
+    doc["n2k_lon_frac_reg"]      = cfg.n2k_lon_frac_reg;
+    doc["n2k_interval_ms"]       = cfg.n2k_interval_ms;
 
     String json;
     serializeJson(doc, json);
@@ -321,6 +418,9 @@ static void handle_post_config()
     if (doc["wifi_pass"].is<const char *>())
         strncpy(cfg.wifi_pass, doc["wifi_pass"], sizeof(cfg.wifi_pass) - 1);
 
+    // RS-485 mode
+    if (!doc["rs485_mode"].isNull())     cfg.rs485_mode     = doc["rs485_mode"].as<uint8_t>();
+
     // RTU
     if (!doc["rtu_baud"].isNull())       cfg.rtu_baud       = doc["rtu_baud"].as<uint32_t>();
     if (!doc["rtu_tx_pin"].isNull())     cfg.rtu_tx_pin     = doc["rtu_tx_pin"].as<uint8_t>();
@@ -338,6 +438,11 @@ static void handle_post_config()
     if (!doc["rtu_reg_start"].isNull())  cfg.rtu_reg_start  = doc["rtu_reg_start"].as<uint16_t>();
     if (!doc["rtu_reg_count"].isNull())  cfg.rtu_reg_count  = doc["rtu_reg_count"].as<uint16_t>();
     if (!doc["rtu_poll_ms"].isNull())    cfg.rtu_poll_ms    = doc["rtu_poll_ms"].as<uint32_t>();
+
+    // NMEA 0183
+    if (!doc["nmea_baud"].isNull())            cfg.nmea_baud            = doc["nmea_baud"].as<uint32_t>();
+    if (!doc["nmea_udp_raw_enabled"].isNull())  cfg.nmea_udp_raw_enabled = doc["nmea_udp_raw_enabled"].as<bool>();
+    if (!doc["nmea_udp_raw_port"].isNull())     cfg.nmea_udp_raw_port    = doc["nmea_udp_raw_port"].as<uint16_t>();
 
     // TCP / UDP
     if (!doc["tcp_port"].isNull())       cfg.tcp_port       = doc["tcp_port"].as<uint16_t>();
@@ -392,6 +497,49 @@ static void handle_get_regs()
 }
 
 // ---------------------------------------------------------------------------
+// Handler: GET /api/nmea  (NMEA 0183 mode – decoded live values)
+// ---------------------------------------------------------------------------
+
+static void handle_get_nmea()
+{
+    GatewayConfig &cfg = config_get();
+    uint8_t sid = cfg.n2k_src_slave;
+
+    JsonDocument doc;
+    doc["ts"]    = millis();
+    doc["valid"] = reg_map_is_valid(sid);
+
+    uint16_t hdg_raw = reg_map_get(sid, cfg.n2k_heading_reg);
+    double   hdg_deg = hdg_raw * 0.1;
+    doc["heading_deg"] = hdg_deg;
+
+    uint16_t dep_raw = reg_map_get(sid, cfg.n2k_depth_reg);
+    double   dep_m   = dep_raw * 0.01;
+    doc["depth_m"] = dep_m;
+
+    uint16_t spd_raw = reg_map_get(sid, cfg.n2k_speed_reg);
+    double   spd_kn  = spd_raw * 0.01;
+    doc["speed_kn"] = spd_kn;
+
+    int16_t  lat_i = (int16_t)reg_map_get(sid, cfg.n2k_lat_int_reg);
+    uint16_t lat_f = reg_map_get(sid, cfg.n2k_lat_frac_reg);
+    int16_t  lon_i = (int16_t)reg_map_get(sid, cfg.n2k_lon_int_reg);
+    uint16_t lon_f = reg_map_get(sid, cfg.n2k_lon_frac_reg);
+
+    double sign_lat = (lat_i < 0) ? -1.0 : 1.0;
+    double sign_lon = (lon_i < 0) ? -1.0 : 1.0;
+    double lat = lat_i + sign_lat * (lat_f / 10000.0);
+    double lon = lon_i + sign_lon * (lon_f / 10000.0);
+    doc["lat"] = lat;
+    doc["lon"] = lon;
+
+    String json;
+    serializeJson(doc, json);
+    add_cors_headers();
+    s_web.send(200, "application/json", json);
+}
+
+// ---------------------------------------------------------------------------
 // Handler: POST /api/reset
 // ---------------------------------------------------------------------------
 
@@ -426,6 +574,8 @@ bool webconfig_init()
     s_web.on("/api/config", HTTP_OPTIONS, handle_options);
     s_web.on("/api/regs",   HTTP_GET,     handle_get_regs);
     s_web.on("/api/regs",   HTTP_OPTIONS, handle_options);
+    s_web.on("/api/nmea",   HTTP_GET,     handle_get_nmea);
+    s_web.on("/api/nmea",   HTTP_OPTIONS, handle_options);
     s_web.on("/api/reset",  HTTP_POST,    handle_reset);
     s_web.onNotFound([]() {
         s_web.send(404, "text/plain", "Not found");

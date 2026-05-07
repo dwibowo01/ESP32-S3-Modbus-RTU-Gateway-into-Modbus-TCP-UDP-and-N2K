@@ -5,6 +5,7 @@
 #include "wifi_mgr/wifi_mgr.h"
 #include "canbus/canbus.h"
 #include "modbus_rtu/modbus_rtu.h"
+#include "nmea0183/nmea0183.h"
 #include "modbus_tcp/modbus_tcp.h"
 #include "modbus_udp/modbus_udp.h"
 #include "n2k_forward/n2k_forward.h"
@@ -34,8 +35,9 @@ void setup()
         Serial.println("[MAIN] CAN bus init failed – check ISO-1050 wiring");
     }
 
-    // 5. Modbus RTU master (RS-485, UART1)
-    modbus_rtu_init();
+    // 5. RS-485 port – Modbus RTU master or NMEA 0183 listener
+    modbus_rtu_init();   // no-op in NMEA 0183 mode
+    nmea0183_init();     // no-op in Modbus RTU mode
 
     // 6. Modbus TCP server (WiFi, port 502 by default)
     modbus_tcp_init();
@@ -58,7 +60,8 @@ void setup()
 // ---------------------------------------------------------------------------
 void loop()
 {
-    modbus_rtu_update();    // poll RS-485 slaves, update reg_map
+    modbus_rtu_update();    // poll RS-485 slaves, update reg_map (Modbus mode)
+    nmea0183_update();      // parse NMEA 0183 sentences, update reg_map (NMEA mode)
     modbus_tcp_update();    // service Modbus TCP clients
     modbus_udp_update();    // periodic UDP JSON broadcast
     n2k_forward_update();   // periodic NMEA 2000 PGN transmit

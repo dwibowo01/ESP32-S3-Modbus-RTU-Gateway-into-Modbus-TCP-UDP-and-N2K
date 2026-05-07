@@ -8,6 +8,7 @@
  */
 
 #include "config.h"
+#include "../defs.h"
 #include <Preferences.h>
 #include <string.h>
 
@@ -26,6 +27,9 @@ void config_reset_defaults()
     s_cfg.wifi_ssid[0] = '\0';
     s_cfg.wifi_pass[0] = '\0';
 
+    // RS-485 mode
+    s_cfg.rs485_mode        = RS485_MODE_MODBUS_RTU;
+
     // Modbus RTU
     s_cfg.rtu_baud          = 9600;
     s_cfg.rtu_tx_pin        = 17;
@@ -36,6 +40,11 @@ void config_reset_defaults()
     s_cfg.rtu_reg_start     = 0;
     s_cfg.rtu_reg_count     = 16;
     s_cfg.rtu_poll_ms       = 1000;
+
+    // NMEA 0183
+    s_cfg.nmea_baud             = 4800;
+    s_cfg.nmea_udp_raw_enabled  = false;
+    s_cfg.nmea_udp_raw_port     = 10110;
 
     // Modbus TCP
     s_cfg.tcp_port          = 502;

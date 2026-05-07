@@ -20,6 +20,7 @@
 #include "modbus_rtu.h"
 #include "../config/config.h"
 #include "../reg_map/reg_map.h"
+#include "../defs.h"
 #include <ModbusRTU.h>
 #include <Arduino.h>
 
@@ -74,6 +75,11 @@ bool modbus_rtu_init()
 {
     GatewayConfig &cfg = config_get();
 
+    if (cfg.rs485_mode != RS485_MODE_MODBUS_RTU) {
+        Serial.println("[RTU] Skipped – RS-485 mode is NMEA 0183");
+        return false;
+    }
+
     Serial1.begin(cfg.rtu_baud, SERIAL_8N1,
                   cfg.rtu_rx_pin, cfg.rtu_tx_pin);
 
@@ -92,6 +98,9 @@ bool modbus_rtu_init()
 
 void modbus_rtu_update()
 {
+    GatewayConfig &cfg = config_get();
+    if (cfg.rs485_mode != RS485_MODE_MODBUS_RTU) return;
+
     // Always drive the library state machine first
     s_rtu.task();
 

@@ -22,6 +22,9 @@ struct GatewayConfig {
     char     wifi_ssid[33];        ///< AP SSID to connect to (STA mode)
     char     wifi_pass[65];        ///< AP password
 
+    // --- RS-485 operating mode ---------------------------------------------
+    uint8_t  rs485_mode;           ///< RS485_MODE_MODBUS_RTU or RS485_MODE_NMEA0183
+
     // --- Modbus RTU master (RS-485) ----------------------------------------
     uint32_t rtu_baud;             ///< Serial baud rate (default 9600)
     uint8_t  rtu_tx_pin;           ///< UART TX / RS-485 DI  (default GPIO 17)
@@ -33,6 +36,11 @@ struct GatewayConfig {
     uint16_t rtu_reg_count;        ///< Number of registers to poll (max GATEWAY_REGS_PER_SLAVE)
     uint32_t rtu_poll_ms;          ///< Interval between polls per slave (ms)
 
+    // --- NMEA 0183 listener (RS-485, same TX/RX/DE pins as RTU) ------------
+    uint32_t nmea_baud;            ///< NMEA 0183 baud rate (default 4800)
+    bool     nmea_udp_raw_enabled; ///< Broadcast raw NMEA sentences over UDP
+    uint16_t nmea_udp_raw_port;    ///< UDP port for raw NMEA sentences (default 10110)
+
     // --- Modbus TCP server --------------------------------------------------
     uint16_t tcp_port;             ///< Listening port (default 502)
 
@@ -42,7 +50,7 @@ struct GatewayConfig {
 
     // --- NMEA 2000 forwarding -----------------------------------------------
     bool     n2k_enabled;          ///< Master enable for N2K forwarding
-    uint8_t  n2k_src_slave;        ///< Slave ID whose registers feed the PGNs
+    uint8_t  n2k_src_slave;        ///< Slave ID (Modbus) or virtual slot (NMEA 0183) to read from
     uint16_t n2k_heading_reg;      ///< Register index → heading in 0.1 ° units
     uint16_t n2k_depth_reg;        ///< Register index → water depth in cm
     uint16_t n2k_speed_reg;        ///< Register index → speed in 0.01 kn units
