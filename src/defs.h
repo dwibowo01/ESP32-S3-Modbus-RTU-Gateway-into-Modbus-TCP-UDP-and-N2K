@@ -1,0 +1,14 @@
+#pragma once
+
+/**
+ * defs.h
+ *
+ * Shared compile-time constants used across all gateway modules.
+ * Change these values here; every module picks them up automatically.
+ */
+
+// Maximum number of Modbus RTU slave devices the gateway can poll.
+#define GATEWAY_MAX_SLAVES      8
+
+// Number of holding registers cached per slave (0-based index 0..63).
+#define GATEWAY_REGS_PER_SLAVE  64
