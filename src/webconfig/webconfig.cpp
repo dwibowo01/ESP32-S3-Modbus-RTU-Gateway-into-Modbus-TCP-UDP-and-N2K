@@ -11,29 +11,6 @@
 #include "webconfig.h"
 #include "../config/config.h"
 #include "../reg_map/reg_map.h"
-#include <WebServer.h>
-#include <ArduinoJson.h>
-#include <Arduino.h>
-
-static WebServer s_web(80);
-
-// ---------------------------------------------------------------------------
-// Embedded HTML (PROGMEM)
-// ---------------------------------------------------------------------------
-
-/**
- * webconfig.cpp
- *
- * Provides a browser-accessible configuration and monitoring UI over HTTP.
- * Uses the built-in ESP32 WebServer class (no extra library needed).
- *
- * The HTML page is stored in PROGMEM as a raw-string literal so it does
- * not consume RAM at runtime.
- */
-
-#include "webconfig.h"
-#include "../config/config.h"
-#include "../reg_map/reg_map.h"
 #include "../defs.h"
 #include <WebServer.h>
 #include <ArduinoJson.h>

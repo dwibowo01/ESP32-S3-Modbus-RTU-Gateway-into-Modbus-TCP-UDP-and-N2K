@@ -106,7 +106,6 @@ void modbus_rtu_update()
 
     if (s_pending) return;
 
-    GatewayConfig &cfg = config_get();
     if (cfg.rtu_slave_count == 0) return;
 
     uint32_t now = millis();
