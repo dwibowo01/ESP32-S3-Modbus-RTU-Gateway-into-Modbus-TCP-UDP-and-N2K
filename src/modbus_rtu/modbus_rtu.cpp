@@ -47,10 +47,11 @@ static bool on_rtu_data(Modbus::ResultCode result, uint16_t /*trans_id*/,
     if (result == Modbus::EX_SUCCESS) {
         uint16_t count = min((uint16_t)cfg.rtu_reg_count,
                              (uint16_t)GATEWAY_REGS_PER_SLAVE);
+        // Store results at 0-based indices 0..count-1 in the slave's block.
+        // rtu_reg_start is only the Modbus address sent on the wire; the
+        // reg_map slot is always 0-based.
         for (uint16_t i = 0; i < count; i++) {
-            reg_map_set(s_cur_slave,
-                        (uint16_t)(cfg.rtu_reg_start + i),
-                        s_buf[i]);
+            reg_map_set(s_cur_slave, i, s_buf[i]);
         }
         reg_map_mark_valid(s_cur_slave);
         Serial.printf("[RTU] Slave %u: %u regs from addr %u OK\n",

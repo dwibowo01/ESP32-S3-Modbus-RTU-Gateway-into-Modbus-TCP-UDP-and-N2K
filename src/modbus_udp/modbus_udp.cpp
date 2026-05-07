@@ -44,9 +44,9 @@ void modbus_udp_update()
         obj["id"]       = sid;
         obj["valid"]    = reg_map_is_valid(sid);
 
-        JsonArray regs  = obj["regs"].to<JsonArray>();
+        JsonArray regs = obj["regs"].to<JsonArray>();
         for (uint16_t r = 0; r < cfg.rtu_reg_count; r++) {
-            regs.add(reg_map_get(sid, cfg.rtu_reg_start + r));
+            regs.add(reg_map_get(sid, r));
         }
     }
 
